@@ -288,7 +288,6 @@ class TimestampKey(TemplateKey):
         :param name: Name by which the key will be refered.
         :param default: Default value for this field. Acceptable values are
                             - None
-                            - a datetime.datetime object
                             - a string formatted according to the format_spec
                             - utc_now, which means the current time in the UTC timezone will be used
                               as the default value.
@@ -312,15 +311,13 @@ class TimestampKey(TemplateKey):
         if isinstance(default, basestring):
             # if the user passes in now or utc, we'll generate the current time as the default time.
             if default.lower() == "now":
-                self._default_to_utc = False
                 default = self.__get_current_time
             elif default.lower() == "utc_now":
-                self._default_to_utc = True
-                default = self.__get_current_time
+                default = self.__get_current_utc_time
             # Base class will validate other values using the format specifier.
-        elif not(default is None or isinstance(default, datetime.datetime)):
-            raise TankError("default for <Sgtk TimestampKey %s> is not of type string, "
-                            "datetime.datetime or None: %s" % (name, default.__class__.__name__))
+        elif default is not None:
+            raise TankError("default for <Sgtk TimestampKey %s> is not of type string or None: %s" %
+                            (name, default.__class__.__name__))
 
         super(TimestampKey, self).__init__(
             name,
@@ -335,14 +332,21 @@ class TimestampKey(TemplateKey):
         we can't mock datetime.now since it's builtin and will make unit tests more complicated to
         write.
 
-        :returns: If utc_default, a datetime object representing time in the UTC timezone. Otherwise,
-                  a datetime object representing time in the local timezone. In any case, the tzinfo
-                  member is None.
+        :returns: A datetime object representing the current time in the local timezone.
         """
-        if self._default_to_utc:
-            return datetime.datetime.utcnow()
-        else:
-            return datetime.datetime.now()
+        return datetime.datetime.now()
+
+    def __get_current_utc_time(self):
+        """
+        Returns the current utc time as a datetime.datetime instance.
+
+        Do not streamline the code so the __init__ method simply passesd the datetime.datetime.utcnow method,
+        we can't mock datatime.datetime.utcnow since it's builtin and will make unit tests more complicated to
+        write.
+
+        :returns: A datetime object representing time current time in the UTC timezone.
+        """
+        return datetime.datetime.utcnow()
 
     def validate(self, value):
         """
@@ -362,11 +366,11 @@ class TimestampKey(TemplateKey):
                 # Bad value, report the error to the client code.
                 self._last_error = "Invalid string: %s" % e.message
                 return False
-        elif not isinstance(value, datetime.datetime):
+        elif isinstance(value, datetime.datetime):
+            return True
+        else:
             self._last_error = "Invalid type: expecting string or datetime.datetime, not %s" % value.__class__.__name__
             return False
-        else:
-            return True
 
     def _as_string(self, value):
         """

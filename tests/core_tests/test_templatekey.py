@@ -706,23 +706,21 @@ class TestTimestampKey(TankTestBase):
         TimestampKey("name")
         # While unlikely, hardcoding a timestamp matching the format spec should be fine.
         TimestampKey("name", default="2015-07-03-09-09-00")
-        # While unlikely, hardcoding a datetime should be fine.
-        TimestampKey("name", default=datetime.datetime(2015, 7, 3, 9, 9, 0))
         # Hardcoding a default value with a custom format spec should be fine.
         TimestampKey("name", default="03-07-2015", format_spec="%d-%m-%Y")
         # utc and now are special cases that end up returning the current time as the default
         # value.
         key = TimestampKey("name", default="utc_now")
         # Make sure UTC time will be generated.
-        self.assertTrue(key._default_to_utc)
+        self.assertEqual(key._default, key._TimestampKey__get_current_utc_time)
         key = TimestampKey("name", default="now")
         # Make sure localtime will be generated.
-        self.assertFalse(key._default_to_utc)
+        self.assertEqual(key._default, key._TimestampKey__get_current_time)
         # One can override the format_spec without providing a default.
         TimestampKey("name", format_spec="%Y-%m-%d")
 
         # format_spec has to be a string.
-        with self.assertRaisesRegexp(TankError, "is not of type string, datetime.datetime or None"):
+        with self.assertRaisesRegexp(TankError, "is not of type string or None"):
             TimestampKey("name", default=1)
 
         # format_spec has to be a string.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-'''
+"""
  -----------------------------------------------------------------------------
  Copyright (c) 2009-2015, Shotgun Software Inc
 
@@ -27,7 +27,7 @@
  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-'''
+"""
 
 
 import base64
@@ -76,7 +76,7 @@ except ImportError:
 
 # ----------------------------------------------------------------------------
 # Version
-__version__ = "3.0.20.RC1"
+__version__ = "3.0.21.dev"
 
 # ----------------------------------------------------------------------------
 # Errors
@@ -1550,7 +1550,7 @@ class Shotgun(object):
         return url
 
     def authenticate_human_user(self, user_login, user_password, auth_token=None):
-        '''Authenticate Shotgun HumanUser. HumanUser must be an active account.
+        """Authenticate Shotgun HumanUser. HumanUser must be an active account.
         :param user_login: Login name of Shotgun HumanUser
 
         :param user_password: Password for Shotgun HumanUser
@@ -1560,7 +1560,6 @@ class Shotgun(object):
 
         :return: Dictionary of HumanUser including ID if authenticated, None if unauthorized.
         """
-        '''
         if not user_login:
             raise ValueError('Please supply a username to authenticate.')
 
@@ -1622,6 +1621,276 @@ class Shotgun(object):
 
         record = self._call_rpc("update_project_last_accessed_by_current_user", params)
         result = self._parse_records(record)[0]
+
+
+
+    def note_thread_read(self, note_id, entity_fields=None):
+        """Returns the full conversation for a given note, including 
+        replies and attachments.
+        
+        Returns a complex data structure on the following form:
+        
+            [{'content': 'Please add more awesomeness to the color grading.',
+              'created_at': '2015-07-14 21:33:28 UTC',
+              'created_by': {'id': 38,
+                             'name': 'John Pink',
+                             'status': 'act',
+                             'type': 'HumanUser',
+                             'valid': 'valid'},
+              'id': 6013,
+              'type': 'Note'},
+             {'created_at': '2015-07-14 21:33:32 UTC',
+              'created_by': {'id': 38,
+                             'name': 'John Pink',
+                             'status': 'act',
+                             'type': 'HumanUser',
+                             'valid': 'valid'},
+              'id': 159,
+              'type': 'Attachment'},
+             {'content': 'More awesomeness added',
+              'created_at': '2015-07-14 21:54:51 UTC',
+              'id': 5,
+              'type': 'Reply',
+              'user': {'id': 38,
+                       'name': 'David Blue',
+                       'status': 'act',
+                       'type': 'HumanUser',
+                       'valid': 'valid'}}]
+
+        The list is returned in descending chronological order.
+        
+        If you wish to include additional fields beyond the ones that are 
+        returned by default, you can specify these in an entity_fields 
+        dictionary. This dictonary should be keyed by entity type and each
+        key should contain a list of fields to retrieve, for example:
+        
+            { "Note":       ["created_by.HumanUser.image", 
+                             "addressings_to", 
+                             "playlist", 
+                             "user" ],
+              "Reply":      ["content"], 
+              "Attachment": ["filmstrip_image", 
+                            "local_storage", 
+                            "this_file", 
+                            "image"]
+            }
+        
+        :param note_id: The id for the note to be retrieved
+        :param entity_fields: Additional fields to retrieve as part 
+                              of the request. See above for details.
+                              
+        :returns: A list of dictionaries. See above for example. 
+        """        
+
+        if self.server_caps.version and self.server_caps.version < (6, 2, 0):
+                raise ShotgunError("note_thread requires server version 6.2.0 or "\
+                    "higher, server is %s" % (self.server_caps.version,))
+
+        entity_fields = entity_fields or {}
+        
+        if not isinstance(entity_fields, dict):
+            raise ValueError("entity_fields parameter must be a dictionary")
+        
+        params = { "note_id": note_id, "entity_fields": entity_fields }
+
+        record = self._call_rpc("note_thread_contents", params)
+        result = self._parse_records(record)
+        return result
+
+
+    def text_search(self, text, entity_types, project_ids=None, limit=None):
+        """
+        Searches across selected entity types for a given text.
+        
+        This method can be used to implement auto completion or a Shotgun 
+        global search. The method requires a text input phrase that is at least 
+        three characters long, or an exception will be raised.
+        
+        Several ways to limit the results of the query are available: 
+        
+        - Using the project_ids parameter, you can provide a list 
+          of project ids to search across. Leaving this at its default
+          value of None will search across all Shotgun data. 
+        
+        - You need to define which subset of entity types to search using the 
+          entity_types parameter. Each of these entity types can be associated 
+          with a filter query to further reduce the list of matches. Below are 
+          some examples of how this can be used practically:
+          
+          Constrain the search to assets and shots only:
+          { "Asset": {} "Shot": {} }
+          
+          Constrain the search to characters only:
+          { "Asset": {"filters": [["sg_asset_type", "is", "character"]] } }
+          
+          Constrain the search to characters or in progress assets:
+          { "Asset": {"filter_operator": "any" 
+                      "filters": [["sg_asset_type", "is", "character"],
+                                  ["sg_status_list", "is", "ip"]] } }
+          
+          The general syntax for this data structure is:
+          { entity_type: { filter_operator: all|any,
+                           filters: shotgun_filter_list } }
+            
+          The filter_operator key is optional and if not specified, 'all' 
+          will be used.
+        
+        A dictionary with keys terms and matches will be returned:
+        
+        {'matches': [{'id': 734,
+                      'type': 'Asset',
+                      'name': 'Bunny',
+                      'project_id': 65,                      
+                      'image': 'https://...',
+                      'links': ['', ''],
+                      'status': 'fin'},
+                      
+                      {'id': 558,
+                       'type': 'Task'
+                       'name': 'FX',
+                       'project_id': 65,
+                       'image': 'https://...',
+                       'links': ['Shot', 'bunny_010_0010'],
+                       'status': 'fin'}],
+            'terms': ['bunny']}
+        
+        The links field will contain information about any linked entity. 
+        This is useful when for example presenting tasks and you want to 
+        display what shot or asset the task is associated with.
+
+        :param text: Text to search for. This must be at least three 
+                     characters long, or an exception will be raised.
+        :param entity_types: Dictionary to specify which entity types to search 
+                             across. See above for usage examples.
+        :param project_ids: List of projects to search. By default, all 
+                            projects will be searched. 
+        :param limit: Specify the maximum number of matches to return.
+        
+        :returns: A complex dictonary structure, see above for example.
+        """        
+        if self.server_caps.version and self.server_caps.version < (6, 2, 0):
+                raise ShotgunError("auto_complete requires server version 6.2.0 or "\
+                    "higher, server is %s" % (self.server_caps.version,))
+        
+        # convert entity_types structure into the form 
+        # that the API endpoint expects
+        if not isinstance(entity_types, dict):
+            raise ValueError("entity_types parameter must be a dictionary")
+        
+        api_entity_types = {}
+        for (entity_type, filter_dict) in entity_types.iteritems():
+            
+            if not isinstance(filter_dict, dict):
+                raise ValueError("value of entity_types['%s'] must "
+                                 "be a dictionary" % entity_type)
+            
+            if "filters" in filter_dict:
+                # there is a filter query inside the dict. 
+                # convert it into native form 
+                filter_operator = filter_dict.get("filter_operator")
+                resolved_filters = _translate_filters(filter_dict["filters"], 
+                                                      filter_operator)
+                api_entity_types[entity_type] = resolved_filters
+            
+            else:
+                api_entity_types[entity_type] = {}
+        
+        project_ids = project_ids or []
+
+        params = { "text": text, 
+                   "entity_types": api_entity_types,
+                   "project_ids": project_ids,
+                   "max_results": limit }
+
+        record = self._call_rpc("query_display_name_cache", params)
+        result = self._parse_records(record)[0]
+        return result
+
+
+    def activity_stream_read(self, entity_type, entity_id, entity_fields=None, 
+                             min_id=None, max_id=None, limit=None):
+        """
+        Retrieves activity stream data from Shotgun.
+        This data corresponds to the data that is displayed on the 
+        Activity tab in the Shotgun Web UI.
+        
+        A complex data structure on the following form will be 
+        returned from Shotgun:
+        
+        {'earliest_update_id': 50,
+         'entity_id': 65,
+         'entity_type': 'Project',
+         'latest_update_id': 79,
+         'updates': [{'created_at': '2015-07-15 11:06:55 UTC',
+                      'created_by': {'id': 38,
+                                     'image': '6641',
+                                     'name': 'John Smith',
+                                     'status': 'act',
+                                     'type': 'HumanUser'},
+                      'id': 79,
+                      'meta': {'entity_id': 6004,
+                               'entity_type': 'Version',
+                               'type': 'new_entity'},
+                      'primary_entity': {'id': 6004,
+                                         'name': 'Review_turntable_v2',
+                                         'status': 'rev',
+                                         'type': 'Version'},
+                      'read': False,
+                      'update_type': 'create'},        
+        ]}
+        
+        The main payload of the return data can be found inside the 'updates' 
+        key, containing a list of dictionaries. This list is always returned 
+        in descending date order. Each item may contain different fields 
+        depending on their update type. The primary_entity key represents the 
+        main Shotgun entity that is associated with the update. By default, 
+        this entity is returned with a set of standard fields. By using the 
+        entity_fields parameter, you can extend the returned data to include 
+        additional fields. If you for example wanted to return the asset type 
+        for all assets and the linked sequence for all Shots, pass the 
+        following entity_fields:
+        
+        {"Shot": ["sg_sequence"], "Asset": ["sg_asset_type"]}
+        
+        Deep queries can be used in this syntax if you want to 
+        traverse into connected data.
+        
+        :param entity_type: Entity type to retrieve activity stream for
+        :param entity_id: Entity id to retrieve activity stream for
+        :param entity_fields: List of additional fields to include. 
+                              See above for details
+        :param max_id: Do not retrieve ids greater than this id. 
+                       This is useful when implementing paging.
+        :param min_id: Do not retrieve ids lesser than this id. 
+                       This is useful when implementing caching of 
+                       the event stream data and you want to 
+                       "top up" an existing cache.
+        :param limit: Limit the number of returned records. If not specified, 
+                      the system default will be used.
+
+        :returns: A complex activity stream data structure. See above for details 
+        """
+        if self.server_caps.version and self.server_caps.version < (6, 2, 0):
+                raise ShotgunError("activity_stream requires server version 6.2.0 or "\
+                    "higher, server is %s" % (self.server_caps.version,))
+
+        # set up parameters to send to server.
+        entity_fields = entity_fields or {}
+        
+        if not isinstance(entity_fields, dict):
+            raise ValueError("entity_fields parameter must be a dictionary")
+        
+        params = { "type": entity_type,
+                   "id": entity_id,
+                   "max_id": max_id,
+                   "min_id": min_id,
+                   "limit": limit,
+                   "entity_fields": entity_fields }
+
+        record = self._call_rpc("activity_stream", params)
+        result = self._parse_records(record)[0]
+        return result
+
 
     def get_session_token(self):
         """
@@ -1881,7 +2150,7 @@ class Shotgun(object):
         return json.loads(body)
 
     def _json_loads_ascii(self, body):
-        '''See http://stackoverflow.com/questions/956867'''
+        """"See http://stackoverflow.com/questions/956867"""
         def _decode_list(lst):
             newlist = []
             for i in lst:
@@ -2039,7 +2308,7 @@ class Shotgun(object):
                 proxy_info=pi, disable_ssl_certificate_validation=self.config.no_ssl_validation)
         else:
             self._connection = Http(timeout=self.config.timeout_secs, ca_certs=self.__ca_certs,
-                disable_ssl_certificate_validation=self.config.no_ssl_validation)
+                proxy_info=None, disable_ssl_certificate_validation=self.config.no_ssl_validation)
 
         return self._connection
 
@@ -2217,8 +2486,8 @@ class FormPostHandler(urllib2.BaseHandler):
 
 
 def _translate_filters(filters, filter_operator):
-    '''_translate_filters translates filters params into data structure
-    expected by rpc call.'''
+    """_translate_filters translates filters params into data structure
+    expected by rpc call."""
     wrapped_filters = {
         "filter_operator": filter_operator or "all",
         "filters": filters
